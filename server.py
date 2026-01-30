@@ -2,13 +2,22 @@ from flask import Flask, request, jsonify
 import os
 import librosa
 import numpy as np
-import soundfile as sf # Linux için gerekli
+import soundfile as sf
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = 'gelen_sesler'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
+
+# --- YARDIMCI FONKSİYONU EN ÜSTE ALDIK (HATA ÇIKMASIN DİYE) ---
+def grafik_verisi_hazirla(y):
+    try:
+        adim = len(y) // 50
+        if adim < 1: adim = 1
+        return np.abs(y[::adim]).tolist()
+    except:
+        return []
 
 @app.route('/analiz', methods=['POST'])
 def analiz_et():
@@ -25,144 +34,87 @@ def analiz_et():
         # 1. SESİ YÜKLE
         y, sr = librosa.load(dosya_yolu)
         
-        # 2. DETAYLI ÖLÇÜMLER (Mühendislik Verileri)
-        zcr = np.mean(librosa.feature.zero_crossing_rate(y)) # Metalik Sürtünme / Cızırtı
+        # 2. ÖLÇÜMLER
+        zcr = np.mean(librosa.feature.zero_crossing_rate(y))
         cent = librosa.feature.spectral_centroid(y=y, sr=sr)
-        ortalama_frekans = np.mean(cent)                     # Sesin Tonu (Kalın/Tiz)
+        ortalama_frekans = np.mean(cent)
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-        darbe_gücü = np.mean(onset_env)                      # Vuruş / Tıkırtı Şiddeti
-        rms = np.mean(librosa.feature.rms(y=y))              # Ses Seviyesi (Volume)
+        darbe_gücü = np.mean(onset_env)
+        rms = np.mean(librosa.feature.rms(y=y))
 
         print(f"📊 {cihaz} -> ZCR: {zcr:.3f} | Freq: {ortalama_frekans:.0f} | Darbe: {darbe_gücü:.3f}")
 
-        # 3. TEŞHİS MOTORU (Expert System Logic)
+        # 3. SENARYOLAR
         baslik = "✅ DURUM NORMAL"
-        detay = f"{cihaz} değerleri stabil görünüyor.\nHerhangi bir anormallik tespit edilmedi."
+        detay = f"{cihaz} değerleri stabil."
         renk = "YESIL"
 
-        # --- A) SESSİZLİK KONTROLÜ ---
+        # SESSİZLİK KONTROLÜ
         if rms < 0.01:
-            return jsonify({
-                'sonuc_baslik': "SESSİZ / BEKLEMEDE",
-                'sonuc_detay': "Ortam sesi çok düşük.\nCihaz çalışmıyor veya uzakta.",
-                'renk_kodu': "GRI",
-                'grafik': _grafik_yap(y)
-            })
-
-        # --- B) CİHAZ BAZLI ARIZA SENARYOLARI ---
+            baslik = "SESSİZ / BEKLEMEDE"
+            detay = "Ortam sesi çok düşük."
+            renk = "GRI"
         
-        # 🧊 1. BUZDOLABI SENARYOLARI
-        if cihaz == "Buzdolabı":
-            # Senaryo: Tıkırtı (Fan veya Röle)
+        # BUZDOLABI
+        elif cihaz == "Buzdolabı":
             if darbe_gücü > 1.4:
                 baslik = "⚠️ MEKANİK TIKIRTI"
                 renk = "KIRMIZI"
-                detay = (
-                    "Olası Arıza Sebepleri:\n"
-                    "🔴 %60 - Fan Pervanesi Buza Çarpıyor\n"
-                    "🟠 %30 - Termik/Röle Arızası\n"
-                    "🟡 %10 - Motor Takozları Gevşemiş"
-                )
-            # Senaryo: Yüksek Uğultu (Motor Zorlanması)
+                detay = "Fan pervanesi çarpıyor (%60) veya röle arızası (%30)."
             elif ortalama_frekans < 1000 and zcr > 0.06:
-                baslik = "⚠️ MOTOR/KOMPRESÖR"
+                baslik = "⚠️ MOTOR ZORLANIYOR"
                 renk = "TURUNCU"
-                detay = (
-                    "Olası Arıza Sebepleri:\n"
-                    "🔴 %70 - Kompresör Aşırı Isınıyor\n"
-                    "🟠 %20 - Kondenser Kirliliği (Hava Alamıyor)\n"
-                    "🟡 %10 - Gaz Dolaşım Sorunu"
-                )
-            # Senaryo: Gaz Sesi (Tıslama)
+                detay = "Kompresör aşırı ısınıyor veya takozlar eskimiş."
             elif ortalama_frekans > 2500 and zcr > 0.1:
                 baslik = "⚠️ GAZ SİSTEMİ"
                 renk = "KIRMIZI"
-                detay = (
-                    "Olası Arıza Sebepleri:\n"
-                    "🔴 %80 - Soğutucu Gaz Kaçağı\n"
-                    "🟠 %20 - Genleşme Valfi Tıkanıklığı"
-                )
+                detay = "Soğutucu gaz akışında tıkanıklık veya kaçak."
 
-        # 🧺 2. ÇAMAŞIR MAKİNESİ SENARYOLARI
+        # ÇAMAŞIR MAKİNESİ
         elif cihaz == "Çamaşır Mak.":
-            # Senaryo: Güm Güm Vurma (Sıkma Sırasında)
             if darbe_gücü > 2.0 and ortalama_frekans < 800:
                 baslik = "⚠️ KAZAN DENGESİZLİĞİ"
                 renk = "KIRMIZI"
-                detay = (
-                    "Olası Arıza Sebepleri:\n"
-                    "🔴 %50 - Yük Dengesiz (Yorgan vb.)\n"
-                    "🟠 %30 - Amortisörler Patlak\n"
-                    "🟡 %20 - Kazan Rulmanları Dağılmış"
-                )
-            # Senaryo: Islık Sesi / Kayış
+                detay = "Yük dengesiz (%50) veya amortisörler patlak (%30)."
             elif ortalama_frekans > 3000:
-                baslik = "⚠️ KAYIŞ/POMPA SORUNU"
+                baslik = "⚠️ KAYIŞ/POMPA"
                 renk = "TURUNCU"
-                detay = (
-                    "Olası Arıza Sebepleri:\n"
-                    "🔴 %70 - Kayış Kaçırıyor (Eskimis)\n"
-                    "🟠 %30 - Tahliye Pompasına Cisim Kaçmış"
-                )
+                detay = "Kayış kaçırıyor veya pompaya cisim kaçmış."
 
-        # 🚗 3. ARABA SENARYOLARI
+        # ARABA
         elif cihaz == "Araba":
-            # Senaryo: Metalik Şıkırtı (Motor bloğundan)
             if darbe_gücü > 1.5 and zcr > 0.15:
                 baslik = "⚠️ MOTOR SİBOP SESİ"
                 renk = "KIRMIZI"
-                detay = (
-                    "Olası Arıza Sebepleri:\n"
-                    "🔴 %60 - Sibop/İtici (Lifter) Arızası\n"
-                    "🟠 %30 - Yağ Seviyesi Kritik Düşük\n"
-                    "🟡 %10 - Enjektör Problemi"
-                )
-            # Senaryo: Kayış Ötmesi
+                detay = "Sibop iticileri arızalı (%60) veya yağ seviyesi düşük."
             elif ortalama_frekans > 4000:
                 baslik = "⚠️ V-KAYIŞI SESİ"
                 renk = "TURUNCU"
-                detay = (
-                    "Olası Arıza Sebepleri:\n"
-                    "🔴 %90 - Alternatör Kayışı Gevşek/Eskimiş\n"
-                    "🟠 %10 - Bilya Dağılması"
-                )
+                detay = "Alternatör kayışı gevşek veya bilya dağılmış."
 
-        # 🏍️ 4. MOTOSİKLET SENARYOLARI
-        elif cihaz == "Motosiklet":
-             if zcr > 0.4:
-                baslik = "⚠️ EGZOZ/BLOK SESİ"
-                renk = "KIRMIZI"
-                detay = (
-                    "Olası Arıza Sebepleri:\n"
-                    "🔴 %50 - Egzoz Patlak/Conta Yanık\n"
-                    "🟠 %40 - Eksantrik Zinciri Gevşek\n"
-                    "🟡 %10 - Sübap Ayarı Bozuk"
-                )
-
-        # 📺 5. GENEL ELEKTRONİK (TV vb.)
-        else: 
+        # GENEL / DİĞER
+        else:
             if zcr > 0.2:
-                baslik = "⚠️ ELEKTRONİK GÜRÜLTÜ"
+                baslik = "⚠️ GENEL GÜRÜLTÜ"
                 renk = "TURUNCU"
-                detay = "Cihazda bobin vızıltısı (Coil Whine) veya kondansatör sorunu olabilir (%80 İhtimal)."
+                detay = "Cihazda normalden fazla sürtünme sesi var."
 
-        # GRAFİK VERİSİ HAZIRLA
         return jsonify({
             'sonuc_baslik': baslik,
             'sonuc_detay': detay,
             'renk_kodu': renk,
-            'grafik': _grafik_yap(y)
+            'grafik': grafik_verisi_hazirla(y)
         })
         
     except Exception as e:
         print(f"HATA: {e}")
-        return jsonify({'sonuc_baslik': "Hata", 'sonuc_detay': str(e), 'renk_kodu': "GRI", 'grafik': []})
-
-# Grafik verisini hazırlayan yardımcı fonksiyon
-def _grafik_yap(y):
-    adim = len(y) // 50
-    if adim < 1: adim = 1
-    return np.abs(y[::adim]).tolist()
+        # Hata durumunda bile JSON dön ki uygulama çökmesin
+        return jsonify({
+            'sonuc_baslik': "Sunucu Hatası", 
+            'sonuc_detay': f"Analiz yapılamadı: {str(e)[:50]}", 
+            'renk_kodu': "GRI", 
+            'grafik': []
+        })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
