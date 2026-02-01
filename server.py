@@ -10,7 +10,6 @@ UPLOAD_FOLDER = 'gelen_sesler'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
-# --- YARDIMCI FONKSİYONU EN ÜSTE ALDIK (HATA ÇIKMASIN DİYE) ---
 def grafik_verisi_hazirla(y):
     try:
         adim = len(y) // 50
@@ -31,8 +30,9 @@ def analiz_et():
     dosya.save(dosya_yolu)
     
     try:
-        # 1. SESİ YÜKLE
-        y, sr = librosa.load(dosya_yolu)
+        # --- İŞTE SİHİRLİ DOKUNUŞ BURADA ---
+        # duration=5 : Sadece ilk 5 saniyeyi yükle (RAM Tasarrufu)
+        y, sr = librosa.load(dosya_yolu, duration=5)
         
         # 2. ÖLÇÜMLER
         zcr = np.mean(librosa.feature.zero_crossing_rate(y))
@@ -49,10 +49,10 @@ def analiz_et():
         detay = f"{cihaz} değerleri stabil."
         renk = "YESIL"
 
-        # SESSİZLİK KONTROLÜ
+        # SESSİZLİK
         if rms < 0.01:
             baslik = "SESSİZ / BEKLEMEDE"
-            detay = "Ortam sesi çok düşük."
+            detay = "Ses seviyesi analiz için çok düşük."
             renk = "GRI"
         
         # BUZDOLABI
@@ -92,7 +92,7 @@ def analiz_et():
                 renk = "TURUNCU"
                 detay = "Alternatör kayışı gevşek veya bilya dağılmış."
 
-        # GENEL / DİĞER
+        # GENEL
         else:
             if zcr > 0.2:
                 baslik = "⚠️ GENEL GÜRÜLTÜ"
@@ -108,10 +108,9 @@ def analiz_et():
         
     except Exception as e:
         print(f"HATA: {e}")
-        # Hata durumunda bile JSON dön ki uygulama çökmesin
         return jsonify({
             'sonuc_baslik': "Sunucu Hatası", 
-            'sonuc_detay': f"Analiz yapılamadı: {str(e)[:50]}", 
+            'sonuc_detay': "Sunucu yoğun, lütfen daha kısa kayıt yapın.", 
             'renk_kodu': "GRI", 
             'grafik': []
         })
